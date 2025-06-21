@@ -6,6 +6,144 @@ import IPython
 import base64
 import html
 
+def do_the_thing(fingerprint_path: str) -> None:
+    fingerprint = cv.imread(fingerprint_path, cv.IMREAD_GRAYSCALE)
+    gx, gy = cv.Sobel(fingerprint, cv.CV_32F, 1, 0), cv.Sobel(fingerprint, cv.CV_32F, 0, 1)
+    gx2, gy2 = gx**2, gy**2
+    gm = np.sqrt(gx2 + gy2)
+
+    sum_gm = cv.boxFilter(gm, -1, (25, 25), normalize = False)
+    thr = sum_gm.max() * 0.2
+    mask = cv.threshold(sum_gm, thr, 255, cv.THRESH_BINARY)[1].astype(np.uint8)
+
+    W = (23, 23)
+    gxx = cv.boxFilter(gx2, -1, W, normalize = False)
+    gyy = cv.boxFilter(gy2, -1, W, normalize = False)
+    gxy = cv.boxFilter(gx * gy, -1, W, normalize = False)
+    gxx_gyy = gxx - gyy
+    gxy2 = 2 * gxy
+
+    orientations = (cv.phase(gxx_gyy, -gxy2) + np.pi) / 2 # '-' to adjust for y axis direction
+    sum_gxx_gyy = gxx + gyy
+    strengths = np.divide(cv.sqrt((gxx_gyy**2 + gxy2**2)), sum_gxx_gyy, out=np.zeros_like(gxx), where=sum_gxx_gyy!=0)
+
+    singular_points = calculate_poincare_index(orientations, mask, step=10, window_size=6)
+    singular_points = merge_nearby_points(singular_points, distance_threshold=50)
+
+    result_image = draw_orientations(fingerprint, orientations, strengths, mask, 1, 16)
+    for sp in singular_points:
+        x, y = sp['coords']
+        scaled_x, scaled_y = x, y
+        color = (0, 255, 255) if sp['type'] == 'core' else (0, 255, 0)
+        cv.circle(result_image, (scaled_x, scaled_y), 30, color, 2)
+        cv.putText(result_image, sp['type'], (scaled_x + 50, scaled_y), cv.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
+
+    show(fingerprint, mask, result_image)
+
+    fingerprint_class = classify_fingerprint(singular_points)
+    print(f"\nKlasa odcisku palca: {fingerprint_class}")
+
+def merge_nearby_points(singular_points, distance_threshold=80):
+    if not singular_points:
+        return []
+
+    merged_points = []
+    for sp1 in singular_points:
+        is_merged = False
+        for sp2 in merged_points:
+            dist = np.sqrt((sp1['coords'][0] - sp2['coords'][0])**2 + (sp1['coords'][1] - sp2['coords'][1])**2)
+            if dist < distance_threshold:
+                is_merged = True
+                break
+        if not is_merged:
+            merged_points.append(sp1)
+    return merged_points
+
+def classify_fingerprint(singular_points):
+    cores = [sp for sp in singular_points if sp['type'] == 'core']
+    deltas = [sp for sp in singular_points if sp['type'] == 'delta']
+    whorl_cores = [sp for sp in singular_points if sp['type'] == 'whorl_core']
+
+    num_cores = len(cores) + len(whorl_cores)
+    num_deltas = len(deltas)
+
+    if num_cores >= 2 and num_deltas >= 2:
+        return "Wir (Whorl)"
+    elif num_cores == 1 and num_deltas == 1:
+        core_x, core_y = cores[0]['coords']
+        delta_x, delta_y = deltas[0]['coords']
+        if core_x > delta_x:
+            return "Pętla Prawa (Right Loop)"
+        else:
+            return "Pętla Lewa (Left Loop)"
+    elif num_cores == 1 and num_deltas == 0:
+        return "Namiotowy Łuk (Tented Arch) / Pętla (niekompletna)"
+    elif num_cores == 0 and num_deltas == 0:
+        return "Łuk (Arch)"
+    else:
+        return "Niesklasyfikowany / Nietypowy"
+
+def calculate_poincare_index(orientations, mask, step=16, window_size=3, poincare_tolerance_degrees=45):
+    h, w = orientations.shape
+    singular_points = []
+    
+    for y in range(window_size, h - window_size, step):
+        for x in range(window_size, w - window_size, step):
+            if mask[y, x] == 0:
+                continue
+            path_points = []
+            for i in range(x - window_size, x + window_size + 1):
+                path_points.append((i, y - window_size))
+            for j in range(y - window_size + 1, y + window_size + 1):
+                path_points.append((x + window_size, j))
+            for i in range(x + window_size - 1, x - window_size - 1, -1):
+                path_points.append((i, y + window_size))
+            for j in range(y + window_size - 1, y - window_size, -1):
+                path_points.append((x - window_size, j))
+
+            unique_path_points = []
+            seen = set()
+            for px, py in path_points:
+                if mask[py, px] == 0:
+                    break
+                if 0 <= px < w and 0 <= py < h and mask[py, px] != 0:
+                    if (px, py) not in seen:
+                        unique_path_points.append((px, py))
+                        seen.add((px, py))
+            
+            path_points = unique_path_points
+            
+            if len(path_points) < 8:
+                continue
+
+            poincare_index_radians = 0
+            N = len(path_points)
+            for i in range(N):
+                p1_x, p1_y = path_points[i]
+                p2_x, p2_y = path_points[(i + 1) % N]
+                
+                theta1 = orientations[p1_y, p1_x]
+                theta2 = orientations[p2_y, p2_x]
+                
+                diff = theta2 - theta1
+                if diff > np.pi / 2:
+                    diff -= np.pi
+                elif diff < -np.pi / 2:
+                    diff += np.pi
+                
+                poincare_index_radians += diff
+            
+            poincare_index_degrees = np.degrees(poincare_index_radians)
+            
+            if abs(poincare_index_degrees + 180) < poincare_tolerance_degrees:
+                singular_points.append({'type': 'core', 'coords': (x, y), 'index': poincare_index_degrees})
+            elif abs(poincare_index_degrees - 180) < poincare_tolerance_degrees:
+                singular_points.append({'type': 'delta', 'coords': (x, y), 'index': poincare_index_degrees})
+            elif abs(poincare_index_degrees - 360) < poincare_tolerance_degrees:
+                singular_points.append({'type': 'whorl_core', 'coords': (x, y), 'index': poincare_index_degrees})
+
+    return singular_points
+
 # Utility function to show an image
 def show(*images, enlarge_small_images = True, max_per_row = -1, font_size = 0):
   if len(images) == 2 and type(images[1])==str:
