@@ -86,7 +86,7 @@ def classify_fingerprint(singular_points):
 def calculate_poincare_index(orientations, mask, step=16, window_size=3, poincare_tolerance_degrees=45):
     h, w = orientations.shape
     singular_points = []
-    
+
     for y in range(window_size, h - window_size, step):
         for x in range(window_size, w - window_size, step):
             if mask[y, x] == 0:
@@ -110,9 +110,9 @@ def calculate_poincare_index(orientations, mask, step=16, window_size=3, poincar
                     if (px, py) not in seen:
                         unique_path_points.append((px, py))
                         seen.add((px, py))
-            
+
             path_points = unique_path_points
-            
+
             if len(path_points) < 8:
                 continue
 
@@ -121,20 +121,20 @@ def calculate_poincare_index(orientations, mask, step=16, window_size=3, poincar
             for i in range(N):
                 p1_x, p1_y = path_points[i]
                 p2_x, p2_y = path_points[(i + 1) % N]
-                
+
                 theta1 = orientations[p1_y, p1_x]
                 theta2 = orientations[p2_y, p2_x]
-                
+
                 diff = theta2 - theta1
                 if diff > np.pi / 2:
                     diff -= np.pi
                 elif diff < -np.pi / 2:
                     diff += np.pi
-                
+
                 poincare_index_radians += diff
-            
+
             poincare_index_degrees = np.degrees(poincare_index_radians)
-            
+
             if abs(poincare_index_degrees + 180) < poincare_tolerance_degrees:
                 singular_points.append({'type': 'core', 'coords': (x, y), 'index': poincare_index_degrees})
             elif abs(poincare_index_degrees - 180) < poincare_tolerance_degrees:
@@ -167,7 +167,7 @@ def show(*images, enlarge_small_images = True, max_per_row = -1, font_size = 0):
           if type(title)!=str:
               img, title = imgOrTuple, ''
       except ValueError:
-          img, title = imgOrTuple, ''        
+          img, title = imgOrTuple, ''
       if type(img)==str:
           data = img
       else:
@@ -180,7 +180,7 @@ def show(*images, enlarge_small_images = True, max_per_row = -1, font_size = 0):
                   img = cv.resize(img,(w*scale,h*scale), interpolation=cv.INTER_NEAREST)
           data = 'data:image/png;base64,' + base64.b64encode(cv.imencode('.png', img)[1]).decode('utf8')
       return data, title
-    
+
   if max_per_row == -1:
       max_per_row = len(images)
 
@@ -190,9 +190,9 @@ def show(*images, enlarge_small_images = True, max_per_row = -1, font_size = 0):
   html_content = ""
   for r in rows:
       l = [convert(t) for t in r]
-      html_content += "".join(["<table><tr>"] 
-              + [f"<td style='text-align:center;{font}'>{html.escape(t)}</td>" for _,t in l]    
-              + ["</tr><tr>"] 
+      html_content += "".join(["<table><tr>"]
+              + [f"<td style='text-align:center;{font}'>{html.escape(t)}</td>" for _,t in l]
+              + ["</tr><tr>"]
               + [f"<td style='text-align:center;'><img src='{d}'></td>" for d,_ in l]
               + ["</tr></table>"])
   IPython.display.display(IPython.display.HTML(html_content))
@@ -225,7 +225,7 @@ def draw_orientations(fingerprint, orientations, strengths, mask, scale = 3, ste
 # Utility function to draw a set of minutiae over an image
 def draw_minutiae(fingerprint, minutiae, termination_color = (255,0,0), bifurcation_color = (0,0,255)):
     res = cv.cvtColor(fingerprint, cv.COLOR_GRAY2BGR)
-    
+
     for x, y, t, *d in minutiae:
         color = termination_color if t else bifurcation_color
         if len(d)==0:
@@ -235,13 +235,13 @@ def draw_minutiae(fingerprint, minutiae, termination_color = (255,0,0), bifurcat
             ox = int(round(math.cos(d) * 7))
             oy = int(round(math.sin(d) * 7))
             cv.circle(res, (x,y), 3, color, 1, cv.LINE_AA)
-            cv.line(res, (x,y), (x+ox,y-oy), color, 1, cv.LINE_AA)        
+            cv.line(res, (x,y), (x+ox,y-oy), color, 1, cv.LINE_AA)
     return res
 
 # Utility function to generate gabor filter kernels
 
 _sigma_conv = (3.0/2.0)/((6*math.log(10))**0.5)
-# sigma is adjusted according to the ridge period, so that the filter does not contain more than three effective peaks 
+# sigma is adjusted according to the ridge period, so that the filter does not contain more than three effective peaks
 def _gabor_sigma(ridge_period):
     return _sigma_conv * ridge_period
 
@@ -270,10 +270,10 @@ def draw_minutiae_and_cylinder(fingerprint, origin_cell_coords, minutiae, values
 
     def _compute_actual_cylinder_coordinates(x, y, t, d):
         c, s = math.cos(d), math.sin(d)
-        rot = np.array([[c, s],[-s, c]])    
+        rot = np.array([[c, s],[-s, c]])
         return (rot@origin_cell_coords.T + np.array([x,y])[:,np.newaxis]).T
-    
-    res = draw_minutiae(fingerprint, minutiae)    
+
+    res = draw_minutiae(fingerprint, minutiae)
     if show_cylinder:
         for v, (cx, cy) in zip(values[i], _compute_actual_cylinder_coordinates(*minutiae[i])):
             cv.circle(res, (int(round(cx)), int(round(cy))), 3, (0,int(round(v*255)),0), 1, cv.LINE_AA)
@@ -291,3 +291,43 @@ def draw_match_pairs(f1, m1, v1, f2, m2, v2, cells_coords, pairs, i, show_cylind
         (x1, y1, *_), (x2, y2, *_) = m1[i1], m2[i2]
         cv.line(res, (int(x1), int(y1)), (w1+int(x2), int(y2)), (0,0,255) if k!=i else (0,255,255), 1, cv.LINE_AA)
     return res
+
+def proces_image_and_get_points(fingerprint_path):
+    fingerprint = cv.imread(fingerprint_path, cv.IMREAD_GRAYSCALE)
+    if fingerprint is None:
+        raise ValueError("Nie udało się wczytać obrazu! Sprawdź ścieżkę lub format pliku.")
+    gx, gy = cv.Sobel(fingerprint, cv.CV_32F, 1, 0), cv.Sobel(fingerprint, cv.CV_32F, 0, 1)
+    gx2, gy2 = gx**2, gy**2
+    gm = np.sqrt(gx2 + gy2)
+
+    sum_gm = cv.boxFilter(gm, -1, (25, 25), normalize = False)
+    thr = sum_gm.max() * 0.2
+    mask = cv.threshold(sum_gm, thr, 255, cv.THRESH_BINARY)[1].astype(np.uint8)
+
+    W = (23, 23)
+    gxx = cv.boxFilter(gx2, -1, W, normalize = False)
+    gyy = cv.boxFilter(gy2, -1, W, normalize = False)
+    gxy = cv.boxFilter(gx * gy, -1, W, normalize = False)
+    gxx_gyy = gxx - gyy
+    gxy2 = 2 * gxy
+
+    orientations = (cv.phase(gxx_gyy, -gxy2) + np.pi) / 2 # '-' to adjust for y axis direction
+
+    singular_points = calculate_poincare_index(orientations, mask, step=10, window_size=6)
+    singular_points = merge_nearby_points(singular_points, distance_threshold=50)
+    return singular_points
+
+def compare_fingerprints(fp1, fp2, max_distance=20):
+    score = 0
+    matched = 0
+    for point1 in fp1:
+        for point2 in fp2:
+            if point1['type'] == point2['type']:
+                c1 = np.array(point1['coords'])
+                c2 = np.array(point2['coords'])
+                dist = np.linalg.norm(c1 - c2)
+                if dist < max_distance:
+                    score += 1 - (dist/max_distance)
+                    matched += 1
+                    break
+    return score, matched
